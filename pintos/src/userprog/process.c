@@ -35,7 +35,7 @@ tid_t
 process_execute (const char *file_name) 
 {
   char *fn_copy;
-  char *token, *save_ptr;
+  char *save_ptr;
   struct file *file;
   tid_t tid;
 
@@ -50,13 +50,13 @@ process_execute (const char *file_name)
   strlcpy (fn_copy, file_name, PGSIZE);
 
   /* Get the file name from the input string */
-  token = strtok_r ((char *)file_name, " ", &save_ptr);
-  file = filesys_open (token);
+  file_name = strtok_r ((char *)file_name, " ", &save_ptr);
+  file = filesys_open (file_name);
   if (file == NULL)
     return TID_ERROR; 
 
   /* Create a new thread to execute FILE_NAME. */
-  tid = thread_create (token, PRI_DEFAULT, start_process, fn_copy);
+  tid = thread_create (file_name, PRI_DEFAULT, start_process, fn_copy);
   if (tid == TID_ERROR)
     palloc_free_page (fn_copy); 
   return tid;
@@ -122,6 +122,7 @@ process_wait (tid_t child_tid)
       sema_down (&md->completed);
       exit_status = md->exit_status;
       sema_up (&md->completed);
+      list_remove (e);
       free (md); 
       break;
     }

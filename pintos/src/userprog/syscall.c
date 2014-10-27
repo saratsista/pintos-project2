@@ -38,6 +38,7 @@ syscall_handler (struct intr_frame *f)
   lock_init (&filesys_lock);
   validate_pointer (f->esp);
   int *sp = (int *)f->esp;
+  struct thread *cur = thread_current ();
 
   switch (*sp)
   {
@@ -51,7 +52,8 @@ syscall_handler (struct intr_frame *f)
 
    case SYS_EXEC:
       get_arguments (sp, &args[0], 1);
-      f->eax = exec ((const char *)args[0]);
+      f->eax = exec ((const char *)pagedir_get_page (cur->pagedir,
+					(const void *) args[0]));
       break;
 
    case SYS_WAIT:
@@ -61,6 +63,7 @@ syscall_handler (struct intr_frame *f)
     
    case SYS_WRITE:
       get_arguments (sp, &args[0], 3);
+      args[1] = (int)pagedir_get_page (cur->pagedir, (const void *)args[1]);
       f->eax = write ((int)args[0], (void *)args[1], (unsigned)args[2]);
       break;
     
@@ -71,17 +74,22 @@ syscall_handler (struct intr_frame *f)
 
    case SYS_CREATE:
       get_arguments (sp, &args[0], 2);
+      args[0] =(int) pagedir_get_page (cur->pagedir, (const void *)args[0]);
       f->eax = create ((char *)args[0], (unsigned) args[1]);
       break;
 
     case SYS_REMOVE:
        get_arguments (sp, &args[0], 1);
-       char *file_to_close = (char *)args[0];
+       char *file_to_close = (char *)pagedir_get_page (cur->pagedir,
+					(const void *)args[0]);
+       lock_acquire (&filesys_lock);
        f->eax = filesys_remove (file_to_close);
+       lock_release (&filesys_lock);
        break;
 
     case SYS_OPEN:
        get_arguments (sp, &args[0], 1);
+       args[0] = (int)pagedir_get_page (cur->pagedir, (const void *)args[0]);
        f->eax = open ((char *)args[0]);
        break; 
   
@@ -92,16 +100,19 @@ syscall_handler (struct intr_frame *f)
 
     case SYS_CLOSE:
        get_arguments (sp, &args[0], 1);
+       args[0] = (int)pagedir_get_page (cur->pagedir, (const void *)args[0]);
        close ((int)args[0]);
        break;       
 
     case SYS_TELL:
        get_arguments (sp, &args[0], 1);
+       args[0] = (int)pagedir_get_page (cur->pagedir, (const void *)args[0]);
        f->eax = tell ((int)args[0]);
        break;
 
     case SYS_SEEK:
        get_arguments (sp, &args[0], 1);
+       args[0] = (int)pagedir_get_page (cur->pagedir, (const void *)args[0]);
        seek ((int)args[0], (unsigned)args[1]);
        break; 
   }
@@ -122,7 +133,7 @@ get_arguments (int *esp, int *args, int count)
 void
 validate_pointer (void *ptr)
 {
-  if (!is_user_vaddr (ptr))
+  if (!is_user_vaddr (ptr)) 
     exit (-1);
   if  ((pagedir_get_page (thread_current ()->pagedir, ptr) == NULL))
     exit (-1);
@@ -159,6 +170,8 @@ open (const char *file)
   lock_acquire (&filesys_lock);
   struct file *open_file = filesys_open (file); 
   lock_release (&filesys_lock);
+  if (open_file == NULL)
+    return -1;
   struct file **fd_array = thread_current ()->fd;
   int k;
   for (k = 2; k < MAX_FD; k++)
@@ -178,7 +191,7 @@ read (int fd, void *_buffer, unsigned size)
   char *buffer = (char *)_buffer;
   validate_pointer (buffer);
   int retval = -1;
-  if (fd < 0 || fd > MAX_FD)
+  if (fd == 1 || fd < 0 || fd > MAX_FD)
     exit (-1); 
   if (fd == 0)
   {
@@ -205,7 +218,11 @@ int
 write (int file_desc, const void *_buffer, unsigned size)
 {
   char *buffer = (char *)_buffer;
+  if (buffer == NULL)
+    exit (-1);
   int retval;
+  if (file_desc < 1 || file_desc > MAX_FD)
+    return -1;
   if (file_desc == 1) {
     putbuf (buffer, size);
     retval = size;
@@ -214,8 +231,11 @@ write (int file_desc, const void *_buffer, unsigned size)
   {
     lock_acquire (&filesys_lock);
     struct file *file_to_write = thread_current ()->fd[file_desc];
-    retval = file_write (file_to_write, buffer, size);
-    thread_current ()->fd[file_desc] = file_to_write;
+    if (file_to_write != NULL) {
+    	retval = file_write (file_to_write, buffer, size);
+    	thread_current ()->fd[file_desc] = file_to_write;
+    }
+    else retval = -1;
     lock_release (&filesys_lock);
   }
   return retval;
@@ -235,6 +255,8 @@ int
 filesize (int fd)
 {
   struct file *file = thread_current ()->fd[fd];
+  if (file == NULL)
+   exit (-1);
   return file_length (file);
 }
 
@@ -242,6 +264,8 @@ unsigned
 tell (int fd)
 {
   struct file *file = thread_current ()->fd[fd];
+  if (file == NULL)
+   exit (-1);
   return file_tell (file);
 } 
 
@@ -249,12 +273,16 @@ void
 seek (int fd, unsigned position)
 {
   struct file *file = thread_current ()->fd[fd];
+  if (file == NULL)
+   exit (-1);
   file_seek (file, position);
 }
 
 pid_t
 exec (const char *file)
 {
+  if (file == NULL)
+   exit (-1);
   tid_t child_tid = process_execute (file);
   return (pid_t)child_tid;
 }
