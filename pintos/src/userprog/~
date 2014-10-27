@@ -1,0 +1,110 @@
+#include <stdio.h>
+#include <syscall-nr.h>
+#include <user/syscall.h>
+#include <string.h>
+#include <ctype.h>
+#include <devices/shutdown.h>
+#include "threads/interrupt.h"
+#include "threads/thread.h"
+#include "threads/vaddr.h"
+#include "userprog/pagedir.h"
+#include "userprog/syscall.h"
+#include <kernel/console.h>
+#include <filesys/filesys.h>
+
+#define MAX_ARGS 3
+#define MAX_LENGTH 255
+static void syscall_handler (struct intr_frame *);
+void validate_pointer (void *ptr);
+void get_arguments (int *esp, char *args[], int count);
+
+void
+syscall_init (void) 
+{
+  intr_register_int (0x30, 3, INTR_ON, syscall_handler, "syscall");
+}
+
+static void
+syscall_handler (struct intr_frame *f) 
+{
+  char *args[MAX_ARGS];
+  validate_pointer (f->esp);
+  int *syscall_number = (int *)f->esp;
+  int *sp = (int *)f->esp;
+//  printf ("syscall-nr: %d\n", *syscall_number); 
+//  hex_dump (stack_ptr, stack_ptr, 128, true);
+
+  switch (*syscall_number)
+  {
+   case SYS_HALT:
+      shutdown_power_off ();
+
+   case SYS_EXIT:
+      ;
+      int *status = (int *)(sp + 1);
+      validate_pointer (status);
+      exit (*status);
+      break;
+
+   case SYS_WRITE:
+    /*  ;
+      int fd = *((int *)(stack_ptr + 1));  
+      char **buffer = ((char **)(stack_ptr + 2));
+      unsigned size = *((unsigned *)(stack_ptr + 3)); 
+      validate_pointer (buffer);
+    */
+      get_arguments (sp, &args[0], 3);
+      int fd = *args[0];
+      char **buffer = (char **)args[1];
+      unsigned size = *args[2];
+      if (fd == 1)
+	putbuf (*buffer, size);
+      break;
+    
+   case SYS_CREATE:
+      get_arguments (sp, &args[0], 2);
+      char *file_name = args[0];
+      if (file_name == NULL)
+	exit (-1);    
+      if (isdigit(*file_name))
+        exit (-1);
+      unsigned initial_size = *args[1];
+      f->eax = filesys_create (file_name, initial_size);
+      break;
+
+    case SYS_OPEN:
+       get_arguments (sp, &args[0], 1);
+       char *file_to_open = args[0];
+       struct file *f = filesys_open (file_to_open); 
+       if (f == NULL)
+         f->eax = -1;
+       break;
+  }
+}
+
+void
+get_arguments (int *esp, char *args[], int count)
+{
+  int i;
+  for (i = 0; i < count; i++)
+  {
+    void *next = ((esp + i) + 1);
+    validate_pointer (next);
+    args[i] = next;
+  }
+}
+
+void
+validate_pointer (void *ptr)
+{
+  if ((ptr == NULL) || !is_user_vaddr(ptr) ||
+      (pagedir_get_page (thread_current ()->pagedir, ptr) == NULL))
+    exit (-1);
+}
+
+void
+exit (int status)
+{
+  printf ("%s: exit(%d)\n", thread_current ()->name, status);
+  thread_exit ();
+}

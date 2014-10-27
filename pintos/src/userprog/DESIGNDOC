@@ -1,0 +1,303 @@
+		     +--------------------------+
+       	       	     |		CS 140		|
+		     | PROJECT 2: USER PROGRAMS	|
+		     | 	   DESIGN DOCUMENT     	|
+		     +--------------------------+
+
+---- GROUP ----
+
+>> Fill in the names and email addresses of your group members.
+
+Kishore Sridhar <kish@ccs.neu.edu>
+Nirupa Narayanappa <nirupa13@ccs.neu.edu>
+Sarat Sista <ssaratc@ccs.neu.edu>
+
+---- PRELIMINARIES ----
+
+>> If you have any preliminary comments on your submission, notes for the
+>> TAs, or extra credit, please give them here.
+
+>> Please cite any offline or online sources you consulted while
+>> preparing your submission, other than the Pintos documentation, course
+>> text, lecture notes, and course staff.
+
+			   ARGUMENT PASSING
+			   ================
+
+---- DATA STRUCTURES ----
+
+>> A1: Copy here the declaration of each new or changed `struct' or
+>> `struct' member, global or static variable, `typedef', or
+>> enumeration.  Identify the purpose of each in 25 words or less.
+
+
+#define DEFAULT_ARGV_SIZE  2   - The default size of argv[], used to store
+				 addresses at which the arguments are stored
+				 on the stack.
+
+#define WORD_SIZE  4 	       - The size of each word on pintos. Used for 
+				 word align in the stack frame.
+
+#define MAX_CMD_LINE  512      - The maximum allowed length of the command line
+				 Used to avoid overflow.
+
+
+---- ALGORITHMS ----
+
+>> A2: Briefly describe how you implemented argument parsing.  How do
+>> you arrange for the elements of argv[] to be in the right order?
+>> How do you avoid overflowing the stack page?
+
+The first argument is always the filename followed by the other arguments,
+We use the strtok_r () function to parse the arguments where the delimiter
+is a space. We push the arguments on to the stack in the order it is tokenized,
+starting from *esp, while decrementing it. At the same time, we store the
+addresses to which the arguments are pushed on to the stack, in the argv[] array.
+The number of tokens give us the size of argc. We add a word align to the stack.
+We then push the addresses of the arguments in the reverse order starting from 
+argv[n-1] to argv[0] on to the stack.  We then push the address of argv,
+value of argc and a fake return address onto the stack in that order. 
+
+We avoid overflow by ensuring that the size of the arguments is not greater than
+MAX_CMD_LINE which is set to 512. To ensure that the arguments fit into a single
+page (4 KB), we did a worst case analysis on the maximum length of the command line 
+that can fit into a page. Memory occupied by each argument = (strlen (argument) + 1
++ sizeof (char *)). We assumed the worst case scenario to be a command line where
+each argument is a single character. In this case, the analysis yielded a value
+slightly greater than 512 which was rounded down.
+
+---- RATIONALE ----
+
+>> A3: Why does Pintos implement strtok_r() but not strtok()?
+
+The strtok_r() function is a reentrant version of strtok(). strtok_r () takes
+an additional parameter save_ptr, which can be used to save state between
+calls. strtok () saves the same state in global memory, which might lead to
+inconsistency and undefined behavior when called by multiple threads. Since
+Pintos implements muti-threading, it uses strtok_r() rather than strtok()
+because the former also works in every case that the latter works.
+
+>> A4: In Pintos, the kernel separates commands into a executable name
+>> and arguments.  In Unix-like systems, the shell does this
+>> separation.  Identify at least two advantages of the Unix approach.
+
+In Unix-like systems the parsing of executable name and arguments is done by 
+the shell to protect the kernel because, in case the program crashes due to 
+parse errors, it crashes the shell (user space) rather than the kernel.
+
+Secondly, since the parsing of arguments does not require kernel privileges,
+it can be done in userland so that the kernel need not be interrupted.
+
+Another advantage is that it is simpler and faster in the Unix-like system
+since it does not have the overhead of switching from userland to kernel mode
+in order to do the parsing.
+
+			     SYSTEM CALLS
+			     ============
+
+---- DATA STRUCTURES ----
+
+>> B1: Copy here the declaration of each new or changed `struct' or
+>> `struct' member, global or static variable, `typedef', or
+>> enumeration.  Identify the purpose of each in 25 words or less.
+
+In thread.h:
+
+#define MAX_FD 128		- Maximum file descriptors allowed for a 
+				  process.
+
+struct thread 
+{
+    .
+    .
+    struct file *fd[MAX_FD];	  - Array to store the pointers to files opened
+				    by the current process. 
+    struct list child_meta_list;  - A list of the child_metadata structures for
+				    the children of the current process.
+    struct child_metadata *md;    - A pointer to the metadata structure of the
+   			      	    current process.
+    .
+    .
+}
+
+/* Metadata structure for each child process */
+
+struct child_metadata
+{
+  tid_t tid;			- tid of the child process.
+  int exit_status;		- The exit status of the child process.
+  struct semaphore completed;   - Semaphore to implement the wait system call.
+  struct list_elem infoelem;    - List element for the child_meta_list.
+};
+
+In syscall.c:
+struct lock filesys_lock	- Lock to synchronize the calls to filesys
+				  functions.
+
+>> B2: Describe how file descriptors are associated with open files.
+>> Are file descriptors unique within the entire OS or just within a
+>> single process?
+
+File descriptors are unique to a process. We have a statically allocated 
+array of pointers to struct file which has a length of  128. The array
+elements are initialized to NULL. The NULL indicates an empty slot.
+We do not use the first two elements since they are reserved for stdout 
+and stdin. When a file is opened we scan this array and assign 
+it to the first empty slot. The index of this element is returned as the 
+file descriptor for the open file. Hence for a process each open file 
+has a unique file descriptor. When a file is closed the pointer is removed 
+from the array by setting the value to NULL.
+
+---- ALGORITHMS ----
+
+>> B3: Describe your code for reading and writing user data from the
+>> kernel.
+
+Pintos provides us with a basic Virtual Memory implementation.
+We validate all the pointers before performing the read/write operations
+by using the functions provided in userprog/pagedir.c and threads/vaddr.h.
+The process exits with exit(-1) when the address is not in user 
+virtual memory or when the address is unmapped or when the pointer is NULL.
+
+The use of lock makes sure that we avoid race conditions when using a shared 
+resource i.e., the file.
+
+>> B4: Suppose a system call causes a full page (4,096 bytes) of data
+>> to be copied from user space into the kernel.  What is the least
+>> and the greatest possible number of inspections of the page table
+>> (e.g. calls to pagedir_get_page()) that might result?  What about
+>> for a system call that only copies 2 bytes of data?  Is there room
+>> for improvement in these numbers, and how much?
+
+The best case scenario is when the data completely resides in one single
+page, which is true for both the cases i.e., 4096 bytes and 2 bytes. In this
+case, there will be only one call to pagedir_get_page () and hence only one
+inspection of the page table.
+
+In the worst case scenario, where the data is spread across a page boundary,
+will require two calls to pagedir_get_page () for both the cases.
+
+There is no room for improvement for either of the cases where the 
+page size is 4 KB.
+
+>> B5: Briefly describe your implementation of the "wait" system call
+>> and how it interacts with process termination.
+
+The wait system call simply calls the process_wait (). 
+The parent should be blocked until the child completes execution. We used
+a sempahore 'completed' to ensure this. When a thread is created, it 
+initializes it's own child_metadata structure and pushes it into it's 
+parent's child_meta_list. During the initialization, it downs the 
+semaphore and begins execution. This semaphore is upped only when the
+child process exits. When process_wait is called, the current thread tries
+to down the child's 'completed' semaphore. If the child is still running,
+then the current thread is blocked until the child exits. Once the child
+exits, the current process is unblocked since it can acquire the semaphore.
+
+The parent now returns the exit status of the child from the child_metadata
+structure which was set by the child before exiting. Before returning from the
+process_wait, it removes the child's metadata structure from it's child_meta_list
+so that a second wait call on the same pid fails and returns -1.
+
+If the wait is called after the child dies, then the process wait immediately
+acquires the semaphore and returns the exit status of the child before
+removing the child_metadata structure from it's child_meta_list. 
+
+>> B6: Any access to user program memory at a user-specified address
+>> can fail due to a bad pointer value.  Such accesses must cause the
+>> process to be terminated.  System calls are fraught with such
+>> accesses, e.g. a "write" system call requires reading the system
+>> call number from the user stack, then each of the call's three
+>> arguments, then an arbitrary amount of user memory, and any of
+>> these can fail at any point.  This poses a design and
+>> error-handling problem: how do you best avoid obscuring the primary
+>> function of code in a morass of error-handling?  Furthermore, when
+>> an error is detected, how do you ensure that all temporarily
+>> allocated resources (locks, buffers, etc.) are freed?  In a few
+>> paragraphs, describe the strategy or strategies you adopted for
+>> managing these issues.  Give an example.
+
+The error checking is isolated form the actual functions of system calls
+by moving it to different functions. For example, all the invalid
+pointer checks are performed in a function validate_pointer() inside
+syscall.c. The ensures that the code is not filled with error checks.
+ 
+
+---- SYNCHRONIZATION ----
+
+>> B7: The "exec" system call returns -1 if loading the new executable
+>> fails, so it cannot return before the new executable has completed
+>> loading.  How does your code ensure this?  How is the load
+>> success/failure status passed back to the thread that calls "exec"?
+
+The exec system call simply calls process_execute() which returns the
+success/failure status from the child thread.
+
+
+>> B8: Consider parent process P with child process C.  How do you
+>> ensure proper synchronization and avoid race conditions when P
+>> calls wait(C) before C exits?  After C exits?  How do you ensure
+>> that all resources are freed in each case?  How about when P
+>> terminates without waiting, before C exits?  After C exits?  Are
+>> there any special cases?
+
+As explained in Question B5, we used semaphores to ensure synchronization
+between parent and child.
+
+If P dies without waiting, before C exits, then C just continues and
+finishes executing.
+
+
+---- RATIONALE ----
+
+>> B9: Why did you choose to implement access to user memory from the
+>> kernel in the way that you did?
+
+We retrieve the arguments passed from the user process in the get_arguments()
+function by decrementing the stack pointer. For each argument retrieved, we
+validate it by calling the validate_pointer () as explained in B3.
+
+>> B10: What advantages or disadvantages can you see to your design
+>> for file descriptors?
+
+The advantage in our design of file descriptor is that our implementation
+gives a O(n) time complexity when we allocate file descriptors to an open
+file and we get a O(1) time complexity while retrieving the file given a file 
+descriptor, since we perform a lookup on an array whose index is the file
+descriptor.
+
+The disadvantage of our design is that we waste memory when we open a
+small number of files and the number of files that can be opened by
+a process is limited, since we have consciously chosen an array of file
+pointers with a length of 128. 
+
+>> B11: The default tid_t to pid_t mapping is the identity mapping.
+>> If you changed it, what advantages are there to your approach?
+
+We have used the default identity mapping in Pintos and not made any
+changes to the tid_t and pid_t mapping.
+
+			   SURVEY QUESTIONS
+			   ================
+
+Answering these questions is optional, but it will help us improve the
+course in future quarters.  Feel free to tell us anything you
+want--these questions are just to spur your thoughts.  You may also
+choose to respond anonymously in the course evaluations at the end of
+the quarter.
+
+>> In your opinion, was this assignment, or any one of the three problems
+>> in it, too easy or too hard?  Did it take too long or too little time?
+
+>> Did you find that working on a particular part of the assignment gave
+>> you greater insight into some aspect of OS design?
+
+>> Is there some particular fact or hint we should give students in
+>> future quarters to help them solve the problems?  Conversely, did you
+>> find any of our guidance to be misleading?
+
+>> Do you have any suggestions for the TAs to more effectively assist
+>> students, either for future quarters or the remaining projects?
+
+>> Any other comments?
+
