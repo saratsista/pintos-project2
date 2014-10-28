@@ -207,8 +207,12 @@ read (int fd, void *_buffer, unsigned size)
   else {
     lock_acquire (&filesys_lock);
     struct file *file = thread_current ()->fd[fd];
-    retval = file_read (file, buffer, size);
-    thread_current ()->fd[fd] = file;
+    if (file != NULL) {
+      file_deny_write (file);
+      retval = file_read (file, buffer, size);
+      thread_current ()->fd[fd] = file;
+    }
+    else retval = -1;
     lock_release (&filesys_lock);
   }
   return retval;
