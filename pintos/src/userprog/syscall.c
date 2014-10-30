@@ -84,7 +84,8 @@ syscall_handler (struct intr_frame *f)
 					(const void *)args[0]);
        lock_acquire (&filesys_lock);
        f->eax = filesys_remove (file_to_close);
-       lock_release (&filesys_lock);
+       if (lock_held_by_current_thread (&filesys_lock))
+         lock_release (&filesys_lock);
        break;
 
     case SYS_OPEN:
@@ -140,6 +141,9 @@ validate_pointer (void *ptr)
 void
 exit (int status)
 {
+ /* XXX: TODO
+    If the current thread exits, then it should be removed from its
+    parent's child list. */
   struct thread *cur = thread_current ();
   cur->md->exit_status = status;
   sema_up (&cur->md->completed);
@@ -161,16 +165,20 @@ create (const char *file_name, unsigned size)
 int
 open (const char *file)
 {
+  struct thread *cur = thread_current ();
   if (file == NULL)
     exit (-1);
   if (strcmp (file, "") == 0)
     return -1;
   lock_acquire (&filesys_lock);
   struct file *open_file = filesys_open (file); 
-  lock_release (&filesys_lock);
+  if (lock_held_by_current_thread (&filesys_lock))
+     lock_release (&filesys_lock);
   if (open_file == NULL)
     return -1;
-  struct file **fd_array = thread_current ()->fd;
+  if (file_get_inode (open_file) == file_get_inode(cur->md->exec_file))
+      file_deny_write (open_file);
+  struct file **fd_array = cur->fd;
   int k;
   for (k = 2; k < MAX_FD; k++)
   { 
@@ -215,7 +223,8 @@ read (int fd, void *_buffer, unsigned size)
       cur->fd[fd] = file;
     }
     else retval = -1;
-    lock_release (&filesys_lock);
+    if (lock_held_by_current_thread (&filesys_lock))
+      lock_release (&filesys_lock);
   }
   return retval;
 }
@@ -224,6 +233,9 @@ int
 write (int file_desc, const void *_buffer, unsigned size)
 {
   char *buffer = (char *)_buffer;
+  struct thread *cur = thread_current ();
+  struct file *file_to_write;
+
   if (buffer == NULL)
     exit (-1);
   int retval;
@@ -236,13 +248,15 @@ write (int file_desc, const void *_buffer, unsigned size)
   else
   {
     lock_acquire (&filesys_lock);
-    struct file *file_to_write = thread_current ()->fd[file_desc];
+    file_to_write = cur->fd[file_desc];
     if (file_to_write != NULL) {
     	retval = file_write (file_to_write, buffer, size);
-    	thread_current ()->fd[file_desc] = file_to_write;
+    	cur->fd[file_desc] = file_to_write;
+        file_allow_write (file_to_write);
     }
     else retval = -1;
-    lock_release (&filesys_lock);
+    if (lock_held_by_current_thread (&filesys_lock))
+      lock_release (&filesys_lock);
   }
   return retval;
 }
@@ -250,11 +264,12 @@ write (int file_desc, const void *_buffer, unsigned size)
 void
 close (int fd)
 {
+  struct thread *cur = thread_current ();
   lock_acquire (&filesys_lock);
-  struct file *file = thread_current ()->fd[fd];
-  file_close (file);
-  thread_current ()->fd[fd] = NULL;
-  lock_release (&filesys_lock);
+  file_close (cur->fd[fd]);
+  cur->fd[fd] = NULL;
+  if (lock_held_by_current_thread (&filesys_lock))
+    lock_release (&filesys_lock);
 }
 
 int
