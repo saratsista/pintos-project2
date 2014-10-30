@@ -486,6 +486,7 @@ init_child_metadata (tid_t child_tid)
 		calloc (1, sizeof (struct child_metadata));
   metadata->tid = child_tid;
   sema_init (&metadata->completed, 0);
+  sema_init (&metadata->child_load, 0);
   metadata->exit_status = 0;
   struct list children = thread_current ()->child_meta_list;
   list_push_front (&children, &metadata->infoelem);

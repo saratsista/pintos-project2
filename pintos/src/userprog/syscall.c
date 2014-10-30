@@ -106,13 +106,11 @@ syscall_handler (struct intr_frame *f)
 
     case SYS_TELL:
        get_arguments (sp, &args[0], 1);
-       args[0] = (int)pagedir_get_page (cur->pagedir, (const void *)args[0]);
        f->eax = tell ((int)args[0]);
        break;
 
     case SYS_SEEK:
-       get_arguments (sp, &args[0], 1);
-       args[0] = (int)pagedir_get_page (cur->pagedir, (const void *)args[0]);
+       get_arguments (sp, &args[0], 2);
        seek ((int)args[0], (unsigned)args[1]);
        break; 
   }

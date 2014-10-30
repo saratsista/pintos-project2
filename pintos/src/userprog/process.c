@@ -38,6 +38,9 @@ process_execute (const char *file_name)
   char *save_ptr;
   struct file *file;
   tid_t tid;
+  struct list *clist = &(thread_current ()->child_meta_list);
+  struct list_elem *e;
+  struct child_metadata *md;
 
   if (strlen (file_name) > MAX_CMD_LINE)
     return TID_ERROR;
@@ -59,6 +62,20 @@ process_execute (const char *file_name)
   tid = thread_create (file_name, PRI_DEFAULT, start_process, fn_copy);
   if (tid == TID_ERROR)
     palloc_free_page (fn_copy); 
+  else 
+  {
+    for (e = list_begin (clist); e != list_end (clist);
+	 e = list_next (e))
+    {
+      md = list_entry (e, struct child_metadata, infoelem);
+      if (tid == md->tid)
+      {
+        sema_down (&md->child_load);
+        sema_up (&md->child_load);
+        break;
+      }
+     }
+  }
   return tid;
 }
 
@@ -71,6 +88,7 @@ start_process (void *file_name_)
   char *file_name = file_name_;
   struct intr_frame if_;
   bool success;
+  struct thread *cur = thread_current ();
 
   file_name = strtok_r (file_name, " ", &save_ptr);
 
@@ -83,9 +101,13 @@ start_process (void *file_name_)
 
   /* If load failed, quit. */
   palloc_free_page (file_name);
+
+  /* Whether load is successful or not, release child_load */
+  sema_up (&(cur->md->child_load));
+
   if (!success) 
     thread_exit ();
-    
+
   /* Start the user process by simulating a return from an
      interrupt, implemented by intr_exit (in
      threads/intr-stubs.S).  Because intr_exit takes all of its

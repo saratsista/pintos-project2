@@ -115,6 +115,7 @@ struct child_metadata
   tid_t tid;
   int exit_status;
   struct semaphore completed;
+  struct semaphore child_load;
   struct list_elem infoelem;
 };
 
