@@ -90,7 +90,6 @@ syscall_handler (struct intr_frame *f)
 
     case SYS_OPEN:
        get_arguments (sp, &args[0], 1);
-       args[0] = (int)pagedir_get_page (cur->pagedir, (const void *)args[0]);
        f->eax = open ((char *)args[0]);
        break; 
   
@@ -166,6 +165,7 @@ int
 open (const char *file)
 {
   struct thread *cur = thread_current ();
+  validate_pointer ((void *)file);
   if (file == NULL)
     exit (-1);
   if (strcmp (file, "") == 0)
@@ -188,8 +188,6 @@ open (const char *file)
      break;
     }
   }
-   if (k == MAX_FD)
-     k = -1;
    return k;
 }  
 
