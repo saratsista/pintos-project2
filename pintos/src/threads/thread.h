@@ -114,6 +114,8 @@ struct child_metadata
 {
   tid_t tid;
   int exit_status;
+  bool load_success;
+  struct file *exec_file;
   struct semaphore completed;
   struct semaphore child_load;
   struct list_elem infoelem;

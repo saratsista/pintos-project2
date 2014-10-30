@@ -485,6 +485,8 @@ init_child_metadata (tid_t child_tid)
   struct child_metadata *metadata = 
 		calloc (1, sizeof (struct child_metadata));
   metadata->tid = child_tid;
+  metadata->load_success = false;
+  metadata->exec_file = NULL;
   sema_init (&metadata->completed, 0);
   sema_init (&metadata->child_load, 0);
   metadata->exit_status = 0;

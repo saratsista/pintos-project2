@@ -71,6 +71,8 @@ process_execute (const char *file_name)
       if (tid == md->tid)
       {
         sema_down (&md->child_load);
+        if (md->load_success == false)
+          tid = TID_ERROR;
         sema_up (&md->child_load);
         break;
       }
@@ -91,6 +93,8 @@ start_process (void *file_name_)
   struct thread *cur = thread_current ();
 
   file_name = strtok_r (file_name, " ", &save_ptr);
+  struct file *file = filesys_open (file_name);
+  thread_current ()->md->exec_file = file;
 
   /* Initialize interrupt frame and load executable. */
   memset (&if_, 0, sizeof if_);
@@ -102,11 +106,17 @@ start_process (void *file_name_)
   /* If load failed, quit. */
   palloc_free_page (file_name);
 
-  /* Whether load is successful or not, release child_load */
-  sema_up (&(cur->md->child_load));
-
-  if (!success) 
+  if (!success)
+  {
+    cur->md->load_success = false; 
+    sema_up (&(cur->md->child_load));
     thread_exit ();
+  }
+  else
+  {
+    cur->md->load_success = true;
+    sema_up (&(cur->md->child_load));
+  }
 
   /* Start the user process by simulating a return from an
      interrupt, implemented by intr_exit (in

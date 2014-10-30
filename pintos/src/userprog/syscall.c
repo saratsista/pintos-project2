@@ -180,12 +180,15 @@ open (const char *file)
      break;
     }
   }
+   if (k == MAX_FD)
+     k = -1;
    return k;
 }  
 
 int
 read (int fd, void *_buffer, unsigned size)
 {
+  struct thread *cur = thread_current ();
   char *buffer = (char *)_buffer;
   validate_pointer (buffer);
   int retval = -1;
@@ -204,11 +207,12 @@ read (int fd, void *_buffer, unsigned size)
   }
   else {
     lock_acquire (&filesys_lock);
-    struct file *file = thread_current ()->fd[fd];
+    struct file *file = cur->fd[fd];
     if (file != NULL) {
-      file_deny_write (file);
+      if (file_get_inode (file) == file_get_inode(cur->md->exec_file))
+        file_deny_write (file);
       retval = file_read (file, buffer, size);
-      thread_current ()->fd[fd] = file;
+      cur->fd[fd] = file;
     }
     else retval = -1;
     lock_release (&filesys_lock);
